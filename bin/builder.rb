@@ -40,8 +40,8 @@ end
 puts white + bold + 'centiBel : media player -- system image builder' + reset
 
 filename = 'centibel.img'
-# leave 5% headroom to compensate for sundry models of flash memory
-capacity_mb = (2 * 1024 / 1.05).round
+# leave 8% headroom to compensate for various models of flash memory
+capacity_mb = (2 * 1024 / 1.08).round
 
 # check for root uid
 raise 'must run as root' unless Process.uid == 0
