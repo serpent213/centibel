@@ -1,0 +1,3 @@
+h1. centiBel : media player
+
+The goal of this project is to provide a touchscreen controlled media player. It started as (and currently is) a final years project for BSc (Hons) Computing at "Southampton Solent University.":http://www.solent.ac.uk/
