@@ -43,6 +43,8 @@ filename = 'centibel.img'
 # leave 8% headroom to compensate for various models of flash memory
 capacity_mb = (2 * 1024 / 1.08).round
 
+root_pwd_crypt = '$1$XFCrfQHD$ZZoCa1Myqo1cGBMmPYOcH.'   # "centibel"
+
 # check for root uid
 raise 'must run as root' unless Process.uid == 0
 
@@ -134,7 +136,7 @@ begin
 
             section 'installing additional packages'
 
-            system 'pacman -Sy --noconfirm lilo base-devel cmake git smbclient qt mpd ruby ruby-mpd kdebindings-smoke'
+            system 'pacman -Sy --noconfirm lilo base-devel openssh cmake git smbclient qt mpd ruby ruby-mpd kdebindings-smoke bsd-games'
 
             # qtruby4 needs to be built (gem is outdated)
 
@@ -162,6 +164,11 @@ begin
               f.puts 'en_GB ISO-8859-1'
             end
             system 'locale-gen'
+
+            system "usermod -p '#{root_pwd_crypt}' root"
+
+            # everyone is blocked by default, but we want ssh to work
+            File.unlink '/etc/hosts.deny'
           end
 
           # wait for child
