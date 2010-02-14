@@ -20,7 +20,7 @@ include Term::ANSIColor
 
 # helper subroutines
 
-def section title
+def section(title)
   puts '', bold(black("*** #{title} ***")), ''
 end
 
@@ -44,6 +44,7 @@ filename = 'centibel.img'
 capacity_mb = (2 * 1024 / 1.08).round
 
 root_pwd_crypt = '$1$XFCrfQHD$ZZoCa1Myqo1cGBMmPYOcH.'   # "centibel"
+qt_distribution = 'qt-everywhere-opensource-src-4.6.1'
 
 # check for root uid
 raise 'must run as root' unless Process.uid == 0
@@ -58,6 +59,8 @@ else
 end
 
 section 'creating empty image file (may take a while)'
+
+# TODO check if file exists, ask for confirmation
 
 system "dd if=/dev/zero of=#{filename} bs=1024k count=#{capacity_mb}"
 
@@ -74,7 +77,7 @@ begin
   track_bytes = 255 * 63 * 512
   cylinders = capacity_mb * 2 ** 20 / track_bytes
 
-  # create a Linux partition spanning the whole disk, beginnung at sector 63
+  # create a Linux partition spanning the whole disk, beginning at sector 63
   system "echo 63 | sfdisk --Linux -C #{cylinders} -uS #{lodevice}"
 
   # find free loopback device for the partition
@@ -121,58 +124,91 @@ begin
           # use pacman cache on host
           system "mount -o bind /var/cache/pacman/pkg #{target_dir}/var/cache/pacman/pkg"
 
-          # save config files for later use in child process
-          config_dir = "#{File.dirname $0}/../conf"
+          # create a directory on host for building and mount it into the target system
+          # we don't want this to happen in the image file
+          Dir.mktmpdir do |build_dir|
+            begin
+              Dir.mkdir "#{target_dir}/tmp/build"
+              system "mount -o bind #{build_dir} #{target_dir}/tmp/build"
 
-          lilo_config   = File.read "#{config_dir}/lilo.conf"
-          rc_config     = File.read "#{config_dir}/rc.conf"
+              # save config files for later use in child process
+              config_dir = "#{File.dirname $0}/../conf"
 
-          # (copy player files)
+              lilo_config   = File.read "#{config_dir}/lilo.conf"
+              rc_config     = File.read "#{config_dir}/rc.conf"
 
-          # create chrooted child
-          #system "chroot #{target_dir}"
-          fork do
-            Dir.chroot target_dir
+              # (copy player files)
 
-            section 'installing additional packages'
+              # create chrooted child
+              #system "chroot #{target_dir}"
+              fork do
+                Dir.chroot target_dir
 
-            system 'pacman -Sy --noconfirm lilo base-devel openssh cmake git smbclient qt mpd ruby ruby-mpd kdebindings-smoke bsd-games'
+                # some tools rely on the mtab file
+                system 'grep -v rootfs /proc/mounts > /etc/mtab'
 
-            # qtruby4 needs to be built (gem is outdated)
+                section 'installing additional packages'
 
-            # symlink is necessary for build to succeed (found on
-            # <http://rubyforge.org/forum/forum.php?thread_id=42757&forum_id=723>)
-            File.symlink '../i686-linux/ruby/config.h', '/usr/include/ruby-1.9.1/ruby/config.h'
+                # TODO collect package names somewhere else, alphabetically
+                #system 'pacman -Sy --noconfirm lilo base-devel openssh cmake git smbclient qt mpd ruby ruby-mpd kdebindings-smoke bsd-games'
+                system 'pacman -Sy --noconfirm lilo base-devel crda zsh vim openssh fbset fbgrab cmake git smbclient mpd ruby ruby-mpd bsd-games'
 
-            Dir.mkdir '/tmp/qtruby'
-            Dir.chdir '/tmp/qtruby'
-            system 'wget http://rubyforge.org/frs/download.php/53816/qt4-qtruby-2.0.3.tgz'
-            system 'tar xzf qt4-qtruby-2.0.3.tgz'
-            system 'cd qt4-qtruby-2.0.3 && cmake . && make && make install'
-            # rm -rf /tmp/qtruby
+                section 'downloading and building Qt/Embedded'
+                puts 'time to fetch some coffee...'
 
-            section 'configuring system'
+                Dir.chdir '/tmp/build'
+                system "wget http://get.qt.nokia.com/qt/source/#{qt_distribution}.tar.gz"
+                system "tar xzf #{qt_distribution}.tar.gz"
+                Dir.chdir qt_distribution
+                system './configure -prefix /usr/local -embedded -opensource -confirm-license'
+                system 'make && make install'
 
-            File.open('/etc/rc.conf', 'w')    { |f| f.write rc_config }
-            File.open('/etc/lilo.conf', 'w')  { |f| f.write lilo_config }
-            system 'lilo'
+                # wget http://ftp-stud.fht-esslingen.de/Mirrors/ftp.kde.org/pub/kde/stable/4.4.0/src/kdebindings-4.4.0.tar.bz2
 
-            File.open('/etc/fstab', 'a')      { |f| f.puts '/dev/sda1 / ext2 noatime 0 1' }
+                # qtruby4 needs to be built (gem is outdated)
 
-            File.open('/etc/locale.gen', 'a') do |f|
-              f.puts 'en_GB.UTF-8 UTF-8'
-              f.puts 'en_GB ISO-8859-1'
+                # symlink is necessary for build to succeed (found on
+                # <http://rubyforge.org/forum/forum.php?thread_id=42757&forum_id=723>)
+                #File.symlink '../i686-linux/ruby/config.h', '/usr/include/ruby-1.9.1/ruby/config.h'
+
+                #Dir.mkdir '/tmp/qtruby'
+                #Dir.chdir '/tmp/qtruby'
+                #system 'wget http://rubyforge.org/frs/download.php/53816/qt4-qtruby-2.0.3.tgz'
+                #system 'tar xzf qt4-qtruby-2.0.3.tgz'
+                #system 'cd qt4-qtruby-2.0.3 && cmake . && make && make install'
+                #system 'rm -rf /tmp/qtruby'
+
+                # system '/bin/bash -i'
+
+                section 'configuring system'
+
+                File.open('/etc/rc.conf', 'w')    { |f| f.write rc_config }
+                File.open('/etc/lilo.conf', 'w')  { |f| f.write lilo_config }
+                system 'lilo'
+
+                File.open('/etc/fstab', 'a')      { |f| f.puts '/dev/sda1 / ext2 noatime 0 1' }
+
+                File.open('/etc/locale.gen', 'a') do |f|
+                  f.puts 'en_GB.UTF-8 UTF-8'
+                  f.puts 'en_GB ISO-8859-1'
+                end
+                system 'locale-gen'
+
+                system "usermod -p '#{root_pwd_crypt}' root"
+
+                # everyone is blocked by default, but we want ssh to work
+                File.unlink '/etc/hosts.deny'
+
+                system 'df -h'
+              end
+
+              # wait for child
+              Process.wait
+            ensure
+              Dir.chdir '/'
+              system "umount #{target_dir}/tmp/build"
             end
-            system 'locale-gen'
-
-            system "usermod -p '#{root_pwd_crypt}' root"
-
-            # everyone is blocked by default, but we want ssh to work
-            File.unlink '/etc/hosts.deny'
           end
-
-          # wait for child
-          Process.wait
         ensure
           system "umount #{target_dir}/var/cache/pacman/pkg"
           system "umount #{target_dir}/sys"
@@ -181,7 +217,7 @@ begin
         end
       ensure
         # unmount image
-        #Dir.chdir '/'
+        Dir.chdir '/'
         system "umount #{lopartition}"
       end
     end
