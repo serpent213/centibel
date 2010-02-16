@@ -16,6 +16,8 @@ require 'readline'
 require 'term/ansicolor'
 require 'tmpdir'
 
+# TODO remove ansicolor dependency
+
 include Term::ANSIColor
 
 # helper subroutines
@@ -36,6 +38,8 @@ def continue?
 end
 
 # main program
+
+# TODO handle command line parameters
 
 puts white + bold + 'centiBel : media player -- system image builder' + reset
 
@@ -126,6 +130,7 @@ begin
 
           # create a directory on host for building and mount it into the target system
           # we don't want this to happen in the image file
+          # TODO use a fixed build dir, keep downloaded packages for reuse
           Dir.mktmpdir do |build_dir|
             begin
               Dir.mkdir "#{target_dir}/tmp/build"
@@ -134,13 +139,16 @@ begin
               # save config files for later use in child process
               config_dir = "#{File.dirname $0}/../conf"
 
-              lilo_config   = File.read "#{config_dir}/lilo.conf"
-              rc_config     = File.read "#{config_dir}/rc.conf"
+              lilo_config           = File.read "#{config_dir}/lilo.conf"
+              rc_config             = File.read "#{config_dir}/rc.conf"
+              uvesafb_config        = File.read "#{config_dir}/uvesafb.conf"
+              ts_config             = File.read "#{config_dir}/ts.conf"
+              tslib_profile         = File.read "#{config_dir}/tslib.sh"
+              qtembedded_profile    = File.read "#{config_dir}/qtembedded.sh"
 
               # (copy player files)
 
               # create chrooted child
-              #system "chroot #{target_dir}"
               fork do
                 Dir.chroot target_dir
 
@@ -149,19 +157,30 @@ begin
 
                 section 'installing additional packages'
 
-                # TODO collect package names somewhere else, alphabetically
+                # TODO collect package names somewhere else, alphabetically, commented
                 #system 'pacman -Sy --noconfirm lilo base-devel openssh cmake git smbclient qt mpd ruby ruby-mpd kdebindings-smoke bsd-games'
-                system 'pacman -Sy --noconfirm lilo base-devel crda zsh vim openssh fbset fbgrab cmake git smbclient mpd ruby ruby-mpd bsd-games'
+                system 'pacman -Sy --noconfirm lilo base-devel crda v86d zsh vim openssh ntp fbset fbgrab cmake git smbclient alsa-utils mpd ruby ruby-mpd bsd-games'
 
-                section 'downloading and building Qt/Embedded'
-                puts 'time to fetch some coffee...'
+                section 'downloading and building tslib'
 
                 Dir.chdir '/tmp/build'
-                system "wget http://get.qt.nokia.com/qt/source/#{qt_distribution}.tar.gz"
-                system "tar xzf #{qt_distribution}.tar.gz"
-                Dir.chdir qt_distribution
-                system './configure -prefix /usr/local -embedded -opensource -confirm-license'
-                system 'make && make install'
+                # we use our own SVN snapshot here
+                system 'wget http://www.centibel.org/files/lib/tslib-r84.tar.bz2'
+                system 'tar xjf tslib-r84.tar.bz2'
+                Dir.chdir 'tslib'
+                system './configure && make && make install'
+
+                if true
+                  section 'downloading and building Qt/Embedded'
+                  puts 'time to fetch some coffee...', ''
+
+                  Dir.chdir '/tmp/build'
+                  system "wget http://get.qt.nokia.com/qt/source/#{qt_distribution}.tar.gz"
+                  system "tar xzf #{qt_distribution}.tar.gz"
+                  Dir.chdir qt_distribution
+                  system './configure -prefix /usr/local -embedded -opensource -confirm-license -qt-mouse-tslib'
+                  system 'make && make install'
+                end
 
                 # wget http://ftp-stud.fht-esslingen.de/Mirrors/ftp.kde.org/pub/kde/stable/4.4.0/src/kdebindings-4.4.0.tar.bz2
 
@@ -182,11 +201,38 @@ begin
 
                 section 'configuring system'
 
-                File.open('/etc/rc.conf', 'w')    { |f| f.write rc_config }
-                File.open('/etc/lilo.conf', 'w')  { |f| f.write lilo_config }
+                File.open('/etc/lilo.conf', 'w')                { |f| f.write lilo_config }
+                File.open('/etc/rc.conf', 'w')                  { |f| f.write rc_config }
                 system 'lilo'
 
-                File.open('/etc/fstab', 'a')      { |f| f.puts '/dev/sda1 / ext2 noatime 0 1' }
+                shell_profile = File.read '/etc/profile'
+                # append "local" bin directories to path
+                shell_profile.sub! /^(\s*PATH=).*/, '\1"/bin:/usr/bin:/usr/local/bin:/sbin:/usr/sbin:/usr/local/sbin"'
+                File.open('/etc/profile', 'w')                  { |f| f.write shell_profile }
+
+                # uvesafb
+                # based on <http://wiki.archlinux.org/index.php/Uvesafb>
+                File.open('/etc/modprobe.d/uvesafb.conf', 'w')  { |f| f.write uvesafb_config }
+                mkinitcpio_config = File.read '/etc/mkinitcpio.conf'
+                # insert v86d hook after udev
+                mkinitcpio_config.sub! /^(\s*HOOKS=.*?udev)/, '\1 v86d'
+                File.open('/etc/mkinitcpio.conf', 'w')          { |f| f.write mkinitcpio_config }
+                # TODO breaks the default kernel, disabled for now -- run manually after boot
+                system 'mkinitcpio -p kernel26'
+
+                # tslib
+                File.open('/etc/ts.conf', 'w')                  { |f| f.write ts_config }
+                File.open('/etc/profile.d/tslib.sh', 'w')       { |f| f.write tslib_profile }
+                File.chmod 0755, '/etc/profile.d/tslib.sh'
+
+                # Qt/Embedded
+                File.open('/etc/profile.d/qtembedded.sh', 'w')  { |f| f.write qtembedded_profile }
+                File.chmod 0755, '/etc/profile.d/qtembedded.sh'
+
+                system 'lilo'
+                # TODO patch lilo.conf for later use on target (keep only boot=...)
+
+                File.open('/etc/fstab', 'a') { |f| f.puts '/dev/sda1 / ext2 noatime 0 1' }
 
                 File.open('/etc/locale.gen', 'a') do |f|
                   f.puts 'en_GB.UTF-8 UTF-8'
@@ -195,6 +241,8 @@ begin
                 system 'locale-gen'
 
                 system "usermod -p '#{root_pwd_crypt}' root"
+
+                # TODO zsh setup
 
                 # everyone is blocked by default, but we want ssh to work
                 File.unlink '/etc/hosts.deny'
@@ -217,7 +265,6 @@ begin
         end
       ensure
         # unmount image
-        Dir.chdir '/'
         system "umount #{lopartition}"
       end
     end
