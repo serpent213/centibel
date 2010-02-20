@@ -1,26 +1,45 @@
 #!/usr/bin/env ruby
 
 # centiBel : media player
-
-# system image builder
-# creates a flash image file containing the player operating system
-# requires the ArchLinux package manager (pacman)
-
-# Steffen Beyer <serpent@centibel.org>
-# <http://www.centibel.org/>
+#
+# System image builder
+#
+# == Synopsis 
+#   This script creates a flash image file containing the player operating system.
+#   Requires the ArchLinux package manager (pacman).
+#
+# == Usage 
+#   builder.rb [options]
+#
+#   For help, use: builder.rb -h
+#
+# == Options
+#   -o, --output FILENAME            Set target image filename
+#   -s, --size BYTES                 Set target image size
+#                                    (append "m" for 10^6, "g" for 10^9)
+#   -h, --help                       Display help (including defaults)
+#       --version                    Display version info
+#       --manual                     Display this manual
+#
+# == Author
+#   Steffen Beyer <serpent@centibel.org>
+#   <http://www.centibel.org/>
+#
+# == Copyright
+#   Copyright 2010 Steffen Beyer.
 
 require 'rubygems'
 
 require 'fileutils'
+require 'optparse'
+require 'rdoc/usage'
 require 'readline'
 require 'term/ansicolor'
 require 'tmpdir'
 
-# TODO remove ansicolor dependency
-
 include Term::ANSIColor
 
-# helper subroutines
+##### helper subroutines #####
 
 def section(title)
   puts '', bold(black("*** #{title} ***")), ''
@@ -37,15 +56,48 @@ def continue?
   end
 end
 
-# main program
+##### main program #####
 
-# TODO handle command line parameters
+# set defaults
+
+options = {}
+options[:image_filename]  = 'centibel.img'
+options[:image_size]      = 2 * 10 ** 9
+
+# parse command line
+
+OptionParser.new do |opts|
+  opts.version = "0.4.0"
+  opts.release = "2010-02-20"
+
+  opts.banner = "Usage: builder.rb [options]"
+
+  opts.separator ""
+  opts.separator "Specific options:"
+
+  opts.on("-o", "--output FILENAME", "Set target image filename (default \"#{options[:image_filename]}\")") do |b|
+    options[:image_filename] = b
+  end
+  opts.on("-s", "--size BYTES", "Set target image size (default #{options[:image_size] / 10**6}MB)") do |b|
+    options[:image_size] = b
+  end
+  opts.on("--manual", "Display manual") do
+    puts opts.ver
+    RDoc::usage
+  end
+end.parse!
 
 puts white + bold + 'centiBel : media player -- system image builder' + reset
 
-filename = 'centibel.img'
-# leave 8% headroom to compensate for various models of flash memory
-capacity_mb = (2 * 1024 / 1.08).round
+if m = options[:image_size].to_s.match(/^(\d+)([mg]?)$/i)
+  capacity_bytes = m[1].to_i * ({ 'm' => 10**6, 'g' => 10**9 }[m[2].downcase] || 1)
+else
+  raise 'cannot interpret target image size'
+end
+
+# leave 5% headroom to compensate for various models of flash memory
+#capacity_MiB = (capacity_bytes / 2**20/ 1.05).round
+capacity_MiB = (capacity_bytes / 2**20).round
 
 root_pwd_crypt = '$1$XFCrfQHD$ZZoCa1Myqo1cGBMmPYOcH.'   # "centibel"
 qt_distribution = 'qt-everywhere-opensource-src-4.6.1'
@@ -64,9 +116,12 @@ end
 
 section 'creating empty image file (may take a while)'
 
-# TODO check if file exists, ask for confirmation
+if File.exists? options[:image_filename]
+  puts "WARNING: output file \"#{options[:image_filename]}\" will be overwritten"
+  continue?
+end
 
-system "dd if=/dev/zero of=#{filename} bs=1024k count=#{capacity_mb}"
+system "dd if=/dev/zero of=#{options[:image_filename]} bs=1024k count=#{capacity_MiB}"
 
 section 'setting up filesystem'
 
@@ -75,11 +130,11 @@ lodevice = `losetup -f`.chomp
 
 begin
   # set up loopback device
-  system "losetup #{lodevice} #{filename}"
+  system "losetup #{lodevice} #{options[:image_filename]}"
 
   # calculate number of "cylinders" assuming 255 heads, 63 sectors/track and 512 bytes/sector
   track_bytes = 255 * 63 * 512
-  cylinders = capacity_mb * 2 ** 20 / track_bytes
+  cylinders = capacity_MiB * 2 ** 20 / track_bytes
 
   # create a Linux partition spanning the whole disk, beginning at sector 63
   system "echo 63 | sfdisk --Linux -C #{cylinders} -uS #{lodevice}"
@@ -92,7 +147,7 @@ begin
     # partition start is fixed (see above)
     # size derived from cylinder count minus start
     start_bytes = 63 * 512
-    system "losetup --offset #{start_bytes} --sizelimit #{cylinders * track_bytes - start_bytes} #{lopartition} #{filename}"
+    system "losetup --offset #{start_bytes} --sizelimit #{cylinders * track_bytes - start_bytes} #{lopartition} #{options[:image_filename]}"
 
     # create an ext2 filesystem
     system "mke2fs -L centibel #{lopartition}"
@@ -152,8 +207,19 @@ begin
               fork do
                 Dir.chroot target_dir
 
+                section 'configuring system'
+
                 # some tools rely on the mtab file
                 system 'grep -v rootfs /proc/mounts > /etc/mtab'
+
+                File.open('/etc/fstab', 'a')                            { |f| f.puts '/dev/sda1 / ext2 noatime 0 1' }
+                File.open('/etc/ld.so.conf.d/local.conf', 'w')          { |f| f.puts '/usr/local/lib' }
+
+                File.open('/etc/locale.gen', 'a') do |f|
+                  f.puts 'en_GB.UTF-8 UTF-8'
+                  f.puts 'en_GB ISO-8859-1'
+                end
+                system 'locale-gen'
 
                 section 'installing additional packages'
 
@@ -182,6 +248,14 @@ begin
                   system 'make && make install'
                 end
 
+                section 'downloading and building QtRuby'
+
+                Dir.chdir '/tmp/build'
+                # we use our own (patched) SVN snapshot here
+                system 'wget http://www.centibel.org/files/lib/qtruby-20100219.tar.bz2'
+                system 'tar xjf qtruby-20100219.tar.bz2'
+                Dir.chdir 'kdebindings'
+
                 # wget http://ftp-stud.fht-esslingen.de/Mirrors/ftp.kde.org/pub/kde/stable/4.4.0/src/kdebindings-4.4.0.tar.bz2
 
                 # qtruby4 needs to be built (gem is outdated)
@@ -197,48 +271,39 @@ begin
                 #system 'cd qt4-qtruby-2.0.3 && cmake . && make && make install'
                 #system 'rm -rf /tmp/qtruby'
 
-                # system '/bin/bash -i'
+                system '/bin/bash -i'
 
-                section 'configuring system'
+                section 'finalising configuration'
 
-                File.open('/etc/lilo.conf', 'w')                { |f| f.write lilo_config }
-                File.open('/etc/rc.conf', 'w')                  { |f| f.write rc_config }
-                system 'lilo'
+                File.open('/etc/rc.conf', 'w')                          { |f| f.write rc_config }
 
                 shell_profile = File.read '/etc/profile'
                 # append "local" bin directories to path
                 shell_profile.sub! /^(\s*PATH=).*/, '\1"/bin:/usr/bin:/usr/local/bin:/sbin:/usr/sbin:/usr/local/sbin"'
-                File.open('/etc/profile', 'w')                  { |f| f.write shell_profile }
+                File.open('/etc/profile', 'w')                          { |f| f.write shell_profile }
 
                 # uvesafb
                 # based on <http://wiki.archlinux.org/index.php/Uvesafb>
-                File.open('/etc/modprobe.d/uvesafb.conf', 'w')  { |f| f.write uvesafb_config }
+                File.open('/etc/modprobe.d/uvesafb.conf', 'w')          { |f| f.write uvesafb_config }
                 mkinitcpio_config = File.read '/etc/mkinitcpio.conf'
                 # insert v86d hook after udev
                 mkinitcpio_config.sub! /^(\s*HOOKS=.*?udev)/, '\1 v86d'
-                File.open('/etc/mkinitcpio.conf', 'w')          { |f| f.write mkinitcpio_config }
+                File.open('/etc/mkinitcpio.conf', 'w')                  { |f| f.write mkinitcpio_config }
                 # TODO breaks the default kernel, disabled for now -- run manually after boot
-                system 'mkinitcpio -p kernel26'
+                # system 'mkinitcpio -p kernel26'
 
                 # tslib
-                File.open('/etc/ts.conf', 'w')                  { |f| f.write ts_config }
-                File.open('/etc/profile.d/tslib.sh', 'w')       { |f| f.write tslib_profile }
-                File.chmod 0755, '/etc/profile.d/tslib.sh'
+                File.open('/etc/ts.conf', 'w')                          { |f| f.write ts_config }
+                File.open('/etc/profile.d/tslib.sh', 'w', 0755)         { |f| f.write tslib_profile }
+                # File.chmod 0755, '/etc/profile.d/tslib.sh'
 
                 # Qt/Embedded
-                File.open('/etc/profile.d/qtembedded.sh', 'w')  { |f| f.write qtembedded_profile }
-                File.chmod 0755, '/etc/profile.d/qtembedded.sh'
+                File.open('/etc/profile.d/qtembedded.sh', 'w', 0755)    { |f| f.write qtembedded_profile }
+                # File.chmod 0755, '/etc/profile.d/qtembedded.sh'
 
+                File.open('/etc/lilo.conf', 'w')                        { |f| f.write lilo_config }
                 system 'lilo'
                 # TODO patch lilo.conf for later use on target (keep only boot=...)
-
-                File.open('/etc/fstab', 'a') { |f| f.puts '/dev/sda1 / ext2 noatime 0 1' }
-
-                File.open('/etc/locale.gen', 'a') do |f|
-                  f.puts 'en_GB.UTF-8 UTF-8'
-                  f.puts 'en_GB ISO-8859-1'
-                end
-                system 'locale-gen'
 
                 system "usermod -p '#{root_pwd_crypt}' root"
 
@@ -247,7 +312,7 @@ begin
                 # everyone is blocked by default, but we want ssh to work
                 File.unlink '/etc/hosts.deny'
 
-                system 'df -h'
+                # system 'df -h'
               end
 
               # wait for child
