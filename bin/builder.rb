@@ -51,9 +51,7 @@ def continue?
     line = Readline.readline cyan('continue (y/[n])? ')
   end until ['y', 'n', ''].any? { |w| w == line }
 
-  unless line == 'y'
-    exit 2
-  end
+  exit 2 unless line == 'y'
 end
 
 ##### main program #####
@@ -99,8 +97,8 @@ end
 #capacity_MiB = (capacity_bytes / 2**20/ 1.05).round
 capacity_MiB = (capacity_bytes / 2**20).round
 
-root_pwd_crypt = '$1$XFCrfQHD$ZZoCa1Myqo1cGBMmPYOcH.'   # "centibel"
-qt_distribution = 'qt-everywhere-opensource-src-4.6.1'
+ROOT_PWD_CRYPT  = '$1$XFCrfQHD$ZZoCa1Myqo1cGBMmPYOcH.'   # "centibel"
+QT_DISTRIBUTION = 'qt-everywhere-opensource-src-4.6.1'
 
 # check for root uid
 raise 'must run as root' unless Process.uid == 0
@@ -241,9 +239,9 @@ begin
                   puts 'time to fetch some coffee...', ''
 
                   Dir.chdir '/tmp/build'
-                  system "wget http://get.qt.nokia.com/qt/source/#{qt_distribution}.tar.gz"
-                  system "tar xzf #{qt_distribution}.tar.gz"
-                  Dir.chdir qt_distribution
+                  system "wget http://get.qt.nokia.com/qt/source/#{QT_DISTRIBUTION}.tar.gz"
+                  system "tar xzf #{QT_DISTRIBUTION}.tar.gz"
+                  Dir.chdir QT_DISTRIBUTION
                   system './configure -prefix /usr/local -embedded -opensource -confirm-license -qt-mouse-tslib'
                   system 'make && make install'
                 end
@@ -305,7 +303,7 @@ begin
                 system 'lilo'
                 # TODO patch lilo.conf for later use on target (keep only boot=...)
 
-                system "usermod -p '#{root_pwd_crypt}' root"
+                system "usermod -p '#{ROOT_PWD_CRYPT}' root"
 
                 # TODO zsh setup
 

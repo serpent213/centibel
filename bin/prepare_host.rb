@@ -28,9 +28,7 @@ def continue?
     line = Readline.readline cyan('continue (y/[n])? ')
   end until ['y', 'n', ''].any? { |w| w == line }
 
-  unless line == 'y'
-    exit 2
-  end
+  exit 2 unless line == 'y'
 end
 
 # main program
