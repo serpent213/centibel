@@ -104,9 +104,9 @@ QT_DISTRIBUTION = 'qt-everywhere-opensource-src-4.6.1'
 raise 'must run as root' unless Process.uid == 0
 
 # find pacman executable
-if system('which pacman.static >/dev/null')
+if system('which pacman.static >/dev/null 2>&1')
   pacman = 'pacman.static'
-elsif system('which pacman >/dev/null')
+elsif system('which pacman >/dev/null 2>&1')
   pacman = 'pacman'
 else
   raise 'pacman not found in path -- maybe run prepare_host.rb?'
@@ -135,7 +135,7 @@ begin
   cylinders = capacity_MiB * 2 ** 20 / track_bytes
 
   # create a Linux partition spanning the whole disk, beginning at sector 63
-  system "echo 63 | sfdisk --Linux -C #{cylinders} -uS #{lodevice}"
+  system "echo 63 | sfdisk --force --Linux -C #{cylinders} -uS #{lodevice}"
 
   # find free loopback device for the partition
   lopartition = `losetup -f`.chomp
@@ -145,6 +145,7 @@ begin
     # partition start is fixed (see above)
     # size derived from cylinder count minus start
     start_bytes = 63 * 512
+    # TODO Ubuntu doesn't like the short options, ArchLinux doesn't like the long ones...
     system "losetup --offset #{start_bytes} --sizelimit #{cylinders * track_bytes - start_bytes} #{lopartition} #{options[:image_filename]}"
 
     # create an ext2 filesystem
@@ -269,7 +270,7 @@ begin
                 #system 'cd qt4-qtruby-2.0.3 && cmake . && make && make install'
                 #system 'rm -rf /tmp/qtruby'
 
-                system '/bin/bash -i'
+                # system '/bin/bash -i'
 
                 section 'finalising configuration'
 

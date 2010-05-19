@@ -39,7 +39,7 @@ puts white + bold + 'centiBel : media player -- build host preparation' + reset
 raise 'must run as root' unless Process.uid == 0
 
 # pacman already available?
-if system('which pacman >/dev/null') || system('which pacman.static >/dev/null')
+if system('which pacman >/dev/null 2>&1') || system('which pacman.static >/dev/null 2>&1')
   puts 'pacman is already installed'
   continue?
 end
