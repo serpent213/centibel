@@ -32,7 +32,7 @@ require 'rubygems'
 
 require 'fileutils'
 require 'optparse'
-require 'rdoc/usage'
+# require 'rdoc/usage'
 require 'readline'
 require 'term/ansicolor'
 require 'tmpdir'
@@ -98,7 +98,7 @@ end
 capacity_MiB = (capacity_bytes / 2**20).round
 
 ROOT_PWD_CRYPT  = '$1$XFCrfQHD$ZZoCa1Myqo1cGBMmPYOcH.'   # "centibel"
-QT_DISTRIBUTION = 'qt-everywhere-opensource-src-4.6.1'
+QT_DISTRIBUTION = 'qt-everywhere-opensource-src-4.6.2'
 
 # check for root uid
 raise 'must run as root' unless Process.uid == 0
@@ -251,26 +251,18 @@ begin
 
                 Dir.chdir '/tmp/build'
                 # we use our own (patched) SVN snapshot here
-                system 'wget http://www.centibel.org/files/lib/qtruby-20100219.tar.bz2'
-                system 'tar xjf qtruby-20100219.tar.bz2'
+                system 'wget http://www.centibel.org/files/lib/qtruby-20100315.tar.bz2'
+                system 'tar xjf qtruby-20100315.tar.bz2'
                 Dir.chdir 'kdebindings'
-
-                # wget http://ftp-stud.fht-esslingen.de/Mirrors/ftp.kde.org/pub/kde/stable/4.4.0/src/kdebindings-4.4.0.tar.bz2
-
-                # qtruby4 needs to be built (gem is outdated)
 
                 # symlink is necessary for build to succeed (found on
                 # <http://rubyforge.org/forum/forum.php?thread_id=42757&forum_id=723>)
                 #File.symlink '../i686-linux/ruby/config.h', '/usr/include/ruby-1.9.1/ruby/config.h'
 
-                #Dir.mkdir '/tmp/qtruby'
-                #Dir.chdir '/tmp/qtruby'
-                #system 'wget http://rubyforge.org/frs/download.php/53816/qt4-qtruby-2.0.3.tgz'
-                #system 'tar xzf qt4-qtruby-2.0.3.tgz'
-                #system 'cd qt4-qtruby-2.0.3 && cmake . && make && make install'
-                #system 'rm -rf /tmp/qtruby'
-
                 # system '/bin/bash -i'
+
+		system './build-ruby19.sh'
+		system 'make install'
 
                 section 'finalising configuration'
 
@@ -294,11 +286,9 @@ begin
                 # tslib
                 File.open('/etc/ts.conf', 'w')                          { |f| f.write ts_config }
                 File.open('/etc/profile.d/tslib.sh', 'w', 0755)         { |f| f.write tslib_profile }
-                # File.chmod 0755, '/etc/profile.d/tslib.sh'
 
                 # Qt/Embedded
                 File.open('/etc/profile.d/qtembedded.sh', 'w', 0755)    { |f| f.write qtembedded_profile }
-                # File.chmod 0755, '/etc/profile.d/qtembedded.sh'
 
                 File.open('/etc/lilo.conf', 'w')                        { |f| f.write lilo_config }
                 system 'lilo'
